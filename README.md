@@ -12,8 +12,10 @@ As part of my MPH-Biomedical Informatics capstone, I investigated *Tas1r2* gene 
 - Reproducibility: RMarkdown
 
 ## Repository Contents
-- `Tas1r2_Analysis.Rmd` – Main analysis pipeline
-- `ILE_Defense.pdf` – Final written report and presentation slides
+- `Tas1r2_Exon_Lvl_Analysis_v3.Rmd` – Main analysis pipeline
+- `Tas1r2_Exon_Lvl_Analysis_Heart.Rmd` - Analysis pipeline for heart
+- `ILE Write Up.pdf` – Final written report
+- `1_DefensePresentation.pptx` - Defense presentation
 
 ## Data Disclaimer
 Raw gene expression data is not included in this repository due to file volume. Data was obtained from GeneNetwork.org, and the RMarkdown files are annotated for clarity regarding expected inputs.
