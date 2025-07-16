@@ -1,18 +1,24 @@
 # Tas1r2 Mouse Transcriptomics
 
-This project explores the role of the *Tas1r2* sweet taste receptor in metabolically active tissues using transcriptomic data from BXD mice via GeneNetwork.org.
+This project explores the transcriptional role of the *Tas1r2* sweet taste receptor in metabolically active tissues using publicly available transcriptomic data from BXD mouse strains (GeneNetwork.org).
 
-## Overview
-- Conducted differential gene expression and correlation analysis across brown adipose tissue, heart, and liver
-- Performed overrepresentation analysis (ORA) and gene set enrichment analysis (GSEA)
-- Generated figures and a mini-thesis-style report as part of MPH capstone
+## Project Summary
+As part of my MPH-Biomedical Informatics capstone, I investigated *Tas1r2* gene expression in brown adipose tissue, liver, and heart. The analysis included correlation testing, differential gene expression (DGE), and pathway enrichment to identify metabolic functions of interest.
 
-## Skills & Tools
-- R (limma, rstatix, enrichR, tidyverse)
-- ggplot2, volcano plots, heatmaps
-- Statistical testing (t-tests, Pearson correlation)
-- Reproducible research with RMarkdown
+## Tools & Methods
+- R: `tidyverse`, `limma`, `enrichR`, `rstatix`
+- Techniques: Pearson correlations, t-tests, DGE, GSEA, ORA
+- Visualizations: heatmaps, volcano plots, enrichment bar charts
+- Reproducibility: RMarkdown
 
-## Output
-- Volcano plots, enrichment bar charts, and summary tables
-- Written report + slide deck (ILE defense)
+## Repository Contents
+- `Tas1r2_Analysis.Rmd` – Main analysis pipeline
+- `ILE_Defense.pdf` – Final written report and presentation slides
+
+## Data Disclaimer
+Raw gene expression data is not included in this repository due to file volume. Data was obtained from GeneNetwork.org, and the RMarkdown files are annotated for clarity regarding expected inputs.
+
+## Key Outputs
+- Volcano plots of differentially expressed genes
+- GSEA/ORA results showing pathway enrichment
+- Summary tables of correlations and fold changes
