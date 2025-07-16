@@ -1,0 +1,630 @@
+---
+title: "Tas1r2_Exon_Lvl_Analysis_v3"
+author: "Ian Brown"
+date: "2025-06-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(readr)
+library(writexl)
+library(readxl)
+library(ggfortify)
+library(data.table)
+library(ggplot2)
+library(ggpubr)
+library(tidytext)
+library(limma)
+library(tibble)
+library(ggrepel)
+library(kableExtra)
+library(pheatmap)
+library(grid)
+library(gridExtra)
+library(patchwork)
+library(cowplot)
+library(webshot2)
+library(png)
+```
+
+```{r data files, include=FALSE}
+# Gastrointestinal --> no diet listed
+# Tas1r2 and Tas1r3 correlation p-value = 0.098
+# cd.file <- read_delim("Data/GI/GN597_MeanDataAnnotated_rev081815.txt", delim = "\t", col_names = TRUE)
+# t1r2.probe <- "10509812"
+# webgestalt_results <- read.delim("Data/GI/enrichment_results_wg_result1750437096.txt", sep = "\t", header = TRUE, stringsAsFactors = FALSE) # Sig Corr ORA
+#GeneTrail files
+# files.all <- list.files("Data/GI/", pattern = "\\.txt$", full.names = TRUE)
+# Filter for only WikiPathwyas
+# files <- files.all[grepl("WikiPathways", files.all, ignore.case = TRUE)]
+# For all results
+# files <- files.all[grepl("GO", files.all, ignore.case = TRUE) | grepl("Pathways", files.all, ignore.case = TRUE)]
+
+# Liver Data --> only cd data
+cd.file <- read_delim("Data/Liver/GN849_EPFL_LISP_BXD_CD_Liver_Affy_Mouse_Gene_1.0_ST_Apr13_RMA_Exon_Level_DataAnnotated_rev122823.txt", delim = "\t", col_names = TRUE) # data-set
+t1r2.probe <- "10509812"
+webgestalt_results <- read.delim("Data/Liver/enrichment_results_wg_result1750431434.txt", sep = "\t", header = TRUE, stringsAsFactors = FALSE) # Sig Corr ORA
+
+files.all <- list.files("Data/Liver/", pattern = "\\.txt$", full.names = TRUE)
+# Filter for only WikiPathwyas
+files <- files.all[grepl("WikiPathways", files.all, ignore.case = TRUE)]
+# For all results
+# files <- files.all[grepl("GO", files.all, ignore.case = TRUE) | grepl("Pathways", files.all, ignore.case = TRUE)]
+ORA.gene.symbol <- read_excel("Outputs/Tas1r2 Liver Exon Correlation ORA.xlsx", sheet = "Pathway Genes")
+
+# Brown Adipose --> only cd data
+# cd.file <- read_delim("Data//BAT/GN470_MeanDataAnnotated_rev081815.txt", delim = "\t", col_names = TRUE)
+# t1r2.probe <- "17420803"
+# webgestalt_results <- read.delim("Data/BAT/enrichment_results_wg_result1750435176.txt", sep = "\t", header = TRUE, stringsAsFactors = FALSE) # Sig Corr ORA
+# files.all <- list.files("Data/BAT/", pattern = "\\.txt$", full.names = TRUE)
+# Filter for only WikiPathwyas
+# files <- files.all[grepl("WikiPathways", files.all, ignore.case = TRUE)]
+# For all results
+# files <- files.all[grepl("GO", files.all, ignore.case = TRUE) | grepl("Pathways", files.all, ignore.case = TRUE)]
+# ORA.gene.symbol <- read_excel("Outputs/Tas1r2 BAT Exon Correlation ORA.xlsx", sheet = "Pathway Genes")
+```
+
+```{r data cleaning, include=FALSE}
+t1r2.gene <- "Tas1r2"
+t1r3.gene <- "Tas1r3"
+
+cd.data <- cd.file %>%
+  select(-c(last_col(), 3:14)) %>%
+  filter(!str_detect(`Gene Symbol`, ";| |Affy")) %>% # removes any genes with listed strings
+  drop_na(3:last_col()) %>% # removes any genes with na values
+  rowwise() %>%
+  mutate(row_mean = mean(c_across(3:last_col()), na.rm = TRUE)) %>% # adds mean column
+  ungroup()
+t1r2.res <- cd.data %>%
+  filter(`Gene Symbol` == t1r2.gene, ProbeSet == t1r2.probe) # reserving Tas1r2 selected probe
+cd.data <- cd.data %>%
+  group_by(`Gene Symbol`) %>%
+  slice_max(order_by = row_mean, n = 1, with_ties = FALSE) %>% # keeps only highest mean
+  ungroup()%>%
+  filter(`Gene Symbol` != t1r2.gene) %>% # removes all Tas1r2 rows
+  bind_rows(t1r2.res) %>% # adds Tas1r2 reserved probe
+  select(-row_mean) # removes the mean and an empty column
+```
+
+```{r prep1, include=FALSE}
+tas1r2.index <- which(cd.data$`Gene Symbol` == "Tas1r2")
+tas1r3.index <- which(cd.data$`Gene Symbol` == t1r3.gene)
+tas1r2.express <- as.numeric(cd.data[tas1r2.index, (3:ncol(cd.data))])
+tas1r3.express <- as.numeric(cd.data[tas1r3.index, (3:ncol(cd.data))])
+
+# Data prep for correlations against Tas1r2 and a specific gene
+correlation_test <- cor.test(tas1r2.express, tas1r3.express, method = "pearson")
+correlation_plot_data <- data.table(
+  Tas1r2 = tas1r2.express,
+  SpecificGene = tas1r3.express
+)
+
+# Create excel for all significantly correlation genes
+correlation_results_cd <- data.table(
+  `Gene Symbol` = cd.data$`Gene Symbol`,
+  Correlation = apply(cd.data[, (3:ncol(cd.data))], 1, function(x) cor(tas1r2.express, x, use = "complete.obs")),
+  P_value = apply(cd.data[, (3:ncol(cd.data))], 1, function(x) cor.test(tas1r2.express, x, method = "pearson")$p.value)
+)
+correlation_results_cd <- correlation_results_cd[`Gene Symbol` != "Tas1r2"]
+correlation_results_cd <- correlation_results_cd[P_value < 0.05]
+
+# write_xlsx(correlation_results_cd, "Tas1r2 [Tissue] Exon Correlation ORA.xlsx", col_names = TRUE, format_headers = TRUE, use_zip64 = FALSE)
+
+# Data prep for ORA chart from WebGestalt - Select top N (e.g., 10) by EnrichmentRatio
+top_terms <- webgestalt_results %>%
+  arrange(desc(enrichmentRatio)) %>%
+  slice(1:10)
+
+# Data prep for GSEA graphs
+df_list <- lapply(files, read.delim, header = TRUE, sep = "\t", stringsAsFactors = FALSE)
+
+df_list <- Map(function(df, file) {
+  df$Source <- tools::file_path_sans_ext(basename(file))
+  return(df)
+}, df_list, files)
+
+merged_df <- bind_rows(df_list)
+
+filtered_df <- merged_df %>%
+  filter(!is.na(P.value), P.value < 0.05) %>%
+  mutate(Regulation_direction = case_when(
+    Regulation_direction == 1 ~ "enriched",
+    Regulation_direction == 0 ~ "depleted",
+    TRUE ~ "unknown")) %>%
+  mutate(X.Name = reorder_within(X.Name, Score, Source))
+
+filtered_df$X.Name <- sub("___.*$", "", filtered_df$X.Name)
+filtered_df$Source <- sub("^[^_]*_-_", "", filtered_df$Source)
+
+correlation_results_cd[correlation_results_cd$`Gene Symbol` == "Hsd3b4", ]
+```
+
+```{r high/low split, include=FALSE}
+# Separating into high and low expressing strains
+tas1r2.quart <- cd.data %>%
+  filter(`Gene Symbol` == "Tas1r2") %>%
+  pivot_longer(-c(ProbeSet, `Gene Symbol`), names_to = "Strain", values_to = "Expression") %>%
+  mutate(
+    q1 = quantile(tas1r2.express, 0.25),
+    q3 = quantile(tas1r2.express, 0.75),
+    tas1r2.groups = case_when(
+      Expression <= q1 ~ "Low",
+      Expression >= q3 ~ "High",
+      TRUE ~ "Mid"
+    )
+  ) %>%
+  filter(tas1r2.groups != "Mid") %>%
+  select(Strain, tas1r2.groups)
+
+cd.long <- cd.data %>%
+  pivot_longer(-c(ProbeSet, `Gene Symbol`), names_to = "Strain", values_to = "Expression") %>%
+  inner_join(tas1r2.quart, by = "Strain")
+
+# Save Tas1r2 expression values before filtering it out
+tas1r2.data <- cd.long %>%
+  filter(`Gene Symbol` == "Tas1r2") %>%
+  select(ProbeSet, `Gene Symbol`, Strain, Expression) %>%
+  pivot_wider(names_from = Strain, values_from = Expression)
+
+cd.data <- cd.long %>%
+  filter(`Gene Symbol` != "Tas1r2") %>%
+  select(ProbeSet, `Gene Symbol`, Strain, Expression) %>%
+  pivot_wider(names_from = Strain, values_from = Expression)
+```
+
+```{r limma, include=FALSE}
+# Saving identifiers
+probe_ids <- cd.data$ProbeSet
+gene_symbols <- cd.data$`Gene Symbol`
+
+# Data prep for limma
+cd.expr <- cd.data %>%
+  select(-ProbeSet, -`Gene Symbol`) %>%
+  as.matrix()
+rownames(cd.expr) <- 1:nrow(cd.expr)
+
+# Establishing high/low mouse strains
+cd.group <- cd.long %>%
+  distinct(Strain, tas1r2.groups) %>%
+  filter(Strain %in% colnames(cd.expr)) %>%
+  arrange(match(Strain, colnames(cd.expr)))
+
+# Setting factors and design for limma
+group <- factor(cd.group$tas1r2.groups, levels = c("High", "Low"))
+design <- model.matrix(~ group)
+
+# limma analysis
+cd.fit <- lmFit(cd.expr, design)
+cd.fit <- eBayes(cd.fit)
+cd.res <- topTable(cd.fit, coef = "groupLow", number = Inf, adjust.method = "BH")
+
+# Annotating limma analysis data frame
+cd.res$RowIndex <- as.integer(rownames(cd.res))
+cd.res$ProbeSet <- probe_ids[cd.res$RowIndex]
+cd.res$`Gene Symbol` <- gene_symbols[cd.res$RowIndex]
+cd.res.annotated <- cd.res %>%
+  select(ProbeSet, `Gene Symbol`, everything(), - RowIndex)
+
+# Compute -log10(P) and add as a new column
+cd.res.annotated <- cd.res.annotated %>%
+  mutate(neg_log10P = -log10(P.Value))
+
+# Filter enriched (logFC > 0 and -log10(P) > 1.3)
+enriched_genes <- cd.res.annotated %>%
+  filter(logFC > 0, neg_log10P > 1.3)
+
+# Filter depleted (logFC < 0 and -log10(P) > 1.3)
+depleted_genes <- cd.res.annotated %>%
+  filter(logFC < 0, neg_log10P > 1.3)
+
+# Write Excel files for enriched/depleted subsets
+# write_xlsx(enriched_genes, "Tas1r2_[Tissue]_Enriched_Genes.xlsx")
+# write_xlsx(depleted_genes, "Tas1r2_[Tissue]_Depleted_Genes.xlsx")
+
+# GeneTrail data prep
+rename.map <- cd.group %>%
+  group_by(`tas1r2.groups`) %>%
+  arrange(Strain) %>%
+  mutate(NewName = paste0(`tas1r2.groups`, row_number())) %>%
+  ungroup()
+
+renamed.cd.data <- cd.data %>%
+  select(-1) %>%
+  rename_with(
+    .fn = ~ rename.map$NewName[match(., rename.map$Strain)],
+    .cols = any_of(rename.map$Strain)
+  ) %>%
+  rename(Gene_Symbol = `Gene Symbol`)
+
+# write.table(renamed.cd.data, file = "cd_data_[Tissue]_export.txt", sep = "\t", quote = FALSE, row.names = FALSE)
+```
+
+```{r}
+# Step 1: Reshape the Tas1r2 data to long format (if it contains multiple strains in columns)
+tas1r2.long <- tas1r2.data %>%
+  pivot_longer(
+    cols = -(1:2),               # exclude ProbeSet and Gene Symbol
+    names_to = "Strain",
+    values_to = "Expression"
+  )
+
+# Step 2: Join with grouping info (e.g., "High"/"Low")
+tas1r2.qq.df <- tas1r2.long %>%
+  left_join(cd.group, by = "Strain") %>%
+  mutate(Group = factor(tas1r2.groups, levels = c("High", "Low")))
+
+# Step 3: Create QQ plot with confidence intervals and grouping
+qq_tas1r2 <- ggqqplot(
+  tas1r2.qq.df,
+  x = "Expression",
+  facet.by = "Group",
+  color = "Group",
+  palette = c("High" = "#E41A1C", "Low" = "#377EB8"),
+  add = "qqline",
+  conf.int = TRUE
+) +
+  labs(
+    title = "QQ Plot of Tas1r2 Expression by Group",
+    x = "Theoretical Quantiles",
+    y = "Sample Quantiles"
+  ) +
+  theme_minimal()
+```
+
+```{r prep2}
+tas1r2.index.new <- which(tas1r2.data$`Gene Symbol` == "Tas1r2")
+tas1r3.index.new <- which(cd.data$`Gene Symbol` == t1r3.gene)
+tas1r2.express.new <- as.numeric(tas1r2.data[tas1r2.index.new, (3:ncol(cd.data))])
+tas1r3.express.new <- as.numeric(cd.data[tas1r3.index.new, (3:ncol(cd.data))])
+
+# Run t-test and get p-value
+t_result <- t.test(tas1r2.express.new ~ group)
+pval <- signif(t_result$p.value, 3)
+
+# Prepare plotting data for Tas1r2 expression t-test between groups
+tas1r2_plot_df <- data.frame(Expression = tas1r2.express.new, Group = group)
+
+# Prepare plotting data for Tas1r3 expression t-test between groups
+tas1r3_plot_df <- data.frame(Expression = tas1r3.express.new, Group = group)
+
+# Data prep for Volcano and Heatmap
+cd.res.annotated$Significant <- with(cd.res.annotated,
+                                     ifelse(P.Value < 0.05, "Significant", "Not Significant"))
+cd.res.annotated <- cd.res.annotated %>%
+  mutate(
+    Sig.FC = case_when(
+      P.Value < 0.05 & abs(logFC) > 1 ~ "Sig P & FC",
+      P.Value < 0.05 ~ "Sig P",
+      TRUE ~ "Not Sig"
+    )
+  )
+label.genes <- cd.res.annotated %>%
+  filter(Significant == "Significant") %>%
+  arrange(P.Value) %>%
+  slice(1:20)
+
+pathway.merged <- merge(ORA.gene.symbol, cd.res.annotated, by = "Gene Symbol")
+pathway.merged <- pathway.merged %>%
+  filter(Significant == "Significant") %>%
+  select(Description, `Gene Name`, `Gene Symbol`, logFC, P.Value) %>%
+  mutate(
+    logFC = round(logFC, 5),
+    P.Value = round(P.Value, 5)
+  ) %>%
+  arrange(Description)
+
+# More data prep for Heatmap
+# Get top 30 significant genes
+cd.top.genes <- cd.res.annotated %>%
+  filter(P.Value < 0.05) %>%
+  arrange(P.Value) %>%
+  slice(1:30)
+
+# Extract rows by index from original matrix
+cd.expr.subset <- cd.expr[as.integer(rownames(cd.top.genes)), ]
+
+# Replace rownames with gene symbols for labeling
+rownames(cd.expr.subset) <- cd.top.genes$`Gene Symbol`
+
+cd.group.ordered <- cd.group %>%
+  filter(Strain %in% colnames(cd.expr.subset)) %>%
+  arrange(match(Strain, colnames(cd.expr.subset)))
+
+# Create annotation data frame
+annotation.col <- data.frame(Group = cd.group.ordered$tas1r2.groups)
+rownames(annotation.col) <- cd.group.ordered$Strain
+
+# Define group colors
+ann.colors <- list(Group = c(High = "firebrick", Low = "steelblue"))
+
+# Z-score scale across genes
+cd.expr.scaled <- t(scale(t(cd.expr.subset)))
+```
+
+```{r plots, include=FALSE}
+light_theme <- theme_minimal() +
+  theme(
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+    panel.grid = element_line(color = "gray90"),
+    text = element_text(color = "black")
+  )
+
+# Q-Q Plot
+qq_tas1r2 <- ggqqplot(tas1r2.express,
+                      title = "A",
+                      color = "steelblue") +
+  xlab("Quantiles") +
+  ylab("Tas1r2 Expression") +
+  light_theme
+
+# WebGestalt ORA Barchart
+ORA.barchart <- ggplot(top_terms, aes(x = reorder(description, enrichmentRatio),
+                      y = enrichmentRatio,
+                      fill = FDR <= 0.05)) +
+  geom_col(width = 0.8) +
+  coord_flip() +
+  scale_fill_manual(
+    values = c("TRUE" = "steelblue4", "FALSE" = "steelblue1"),
+    labels = c("TRUE" = "FDR ≤ 0.05", "FALSE" = "FDR > 0.05"),
+    name = "Significance"
+  ) +
+  labs(title = "D",
+       x = "Pathway",
+       y = "Enrichment Ratio") +
+  light_theme +
+  theme(legend.position = "bottom")
+
+# Tas1r2/Tas1r3 Correlation Plot
+correlation_plot <- ggplot(correlation_plot_data, aes(x = SpecificGene, y = Tas1r2)) +
+  geom_point(color = "blue", size = 2) +
+  geom_smooth(method = "lm", color = "red", se = FALSE) +
+  ggtitle(paste("A")) +
+  xlab(paste(t1r3.gene, "Expression")) +
+  ylab("Tas1r2 Expression") +
+  annotate("text", x = min(tas1r3.express), y = max(tas1r2.express), 
+           label = paste("R =", round(correlation_test$estimate, 2), 
+                         "\nP =", signif(correlation_test$p.value, 2)), 
+           hjust = 0, vjust = 1.5, size = 4, color = "black") +
+  light_theme
+
+# Boxplot for t-test between high/low groups for Tas1r2
+tas1r2.boxplot <- ggplot(tas1r2_plot_df, aes(x = Group, y = Expression, fill = Group)) +
+  geom_boxplot(outlier.shape = NA, width = 0.5) +
+  geom_jitter(width = 0.1, size = 1.5, alpha = 0.7) +
+  stat_compare_means(method = "t.test", label.y = max(tas1r2_plot_df$Expression) * 1.05) +  # adds stars or p-value
+  labs(title = "A",
+       y = "Expression", x = "") +
+  scale_fill_manual(values = c("High" = "#1b9e77", "Low" = "#d95f02")) +
+  light_theme +
+  theme(legend.position = "none")
+
+# Boxplot for t-test between high/low groups for Tas1r3
+tas1r3.boxplot <- ggplot(tas1r3_plot_df, aes(x = Group, y = Expression, fill = Group)) +
+  geom_boxplot(outlier.shape = NA, width = 0.5) +
+  geom_jitter(width = 0.1, size = 1.5, alpha = 0.7) +
+  stat_compare_means(method = "t.test", label.y = max(tas1r3_plot_df$Expression) * 1.05) +  # adds stars or p-value
+  labs(title = "D",
+       y = "Expression", x = "") +
+  scale_fill_manual(values = c("High" = "#1b9e77", "Low" = "#d95f02")) +
+  light_theme +
+  theme(legend.position = "none")
+
+# GSEA Barchart Summary
+GSEA_bar <- ggplot(filtered_df, aes(x = X.Name, y = Score, fill = Regulation_direction)) +
+  geom_col() +
+  coord_flip() +
+  scale_x_reordered() +
+  facet_wrap(~ Source, ncol = 1, scales = "free_y") +
+  scale_fill_manual(values = c("enriched" = "#E41A1C", "depleted" = "#377EB8")) +
+  labs(
+    title = "A",
+    x = "Pathway",
+    y = "Enrichment Score",
+    fill = "Regulation") +
+  light_theme +
+  theme(axis.text.y = element_text(size = 8))
+
+# Heatmap
+heatmap <- pheatmap(cd.expr.scaled,
+         cluster_rows = TRUE,
+         cluster_cols = TRUE,
+         annotation_col = annotation.col,
+         annotation_colors = ann.colors,
+         show_rownames = TRUE,
+         show_colnames = TRUE,
+         fontsize_row = 7,
+         main = "A")
+
+# Volcano plot
+volcano <- ggplot(cd.res.annotated, aes(x = logFC, y = -log10(P.Value), color = Sig.FC)) +
+  geom_point(alpha = 0.8) +
+  geom_text_repel(data = label.genes,
+                  aes(label = `Gene Symbol`),
+                  size = 3, max.overlaps = 20, color = "black") +
+  geom_text_repel(data = cd.res.annotated %>% filter(Sig.FC == "Sig P & FC"),
+                  aes(label = `Gene Symbol`),
+                  size = 3, max.overlaps = Inf, color = "blue") +
+  scale_color_manual(values = c(
+    "Not Sig" = "grey", 
+    "Sig P" = "orange",
+    "Sig P & FC" = "red"
+    )) +
+  labs(title = "Volcano Plot", x = "Log Fold Change", y = "-Log10 P-Value") +
+  theme_minimal()
+
+# GSEA Table Summary
+table_df <- filtered_df %>%
+  select(Source, X.Name, Score, P.value, Regulation_direction) %>%
+  arrange(desc(Source)) %>%
+  select(-Score) %>%
+  rename(
+    Pathway = X.Name,
+    Enrichment = Regulation_direction
+  ) %>%
+  select(Enrichment, Pathway, P.value, Source) %>%
+  kable(
+    caption = "Significant Pathways from GSEA",
+    digits = 3,
+    col.names = c("Regulation", "Pathway", "P-value", "Source"),
+    align = c("c", "l", "r", "c")
+  ) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed"),
+    full_width = FALSE,
+    font_size = 12
+  ) %>%
+  column_spec(1, bold = TRUE, color = "#E41A1C") %>%    # Color “upregulated” red; adjust color as needed
+  column_spec(2, italic = TRUE) %>%
+  save_kable(
+    file = "table.png",
+    zoom = 3,
+    vwidth = 540,
+    vheight = 800
+  )
+
+pathway.table <- pathway.merged %>%
+  mutate(logFC = cell_spec(logFC,
+                           color = ifelse(logFC > 0, "red", "blue"))) %>%
+  select(everything()) %>%
+  kable(
+    format = "html",
+    escape = FALSE,
+    caption = "Pathway and Gene Name"
+  ) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "condensed"),
+    full_width = FALSE,
+    font_size = 12,
+    position = "center"
+  ) %>%
+  save_kable(
+    file = "Pathway and Gene Name.png"
+  )
+```
+
+```{r individual saves}
+# Figure 1
+ggsave("Plots/1_QQ_BAT.png", plot = qq_tas1r2, width = 6, height = 4)
+ggsave("Plots/1_ORA_BAT.png", plot = ORA.barchart, width = 6, height = 4)
+
+# Figure 2
+ggsave("Plots/2_Correlation_BAT.png", plot = correlation_plot, width = 6, height = 4)
+
+# Figure 3
+ggsave("Plots/3_tas1r2.ttest_BAT.png", plot = tas1r2.boxplot, width = 6, height = 4)
+ggsave("Plots/3_tas1r3.ttest_BAT.png", plot = tas1r3.boxplot, width = 6, height = 4)
+
+# Figure 4
+ggsave("Plots/4_GSEA_BAT.png", plot = GSEA_bar, width = 6, height = 4)
+
+# Figure 6
+ggsave("Plots/6_Heatmap_BAT.png", plot = heatmap, width = 6, height = 6)
+```
+
+```{r figure specific panels}
+# Fig 1
+img1 <- rasterGrob(readPNG("Plots/1_QQ_BAT.png"), interpolate = TRUE)
+img2 <- rasterGrob(readPNG("Plots/1_QQ_Heart.png"), interpolate = TRUE)
+img3 <- rasterGrob(readPNG("Plots/1_QQ_Liver.png"), interpolate = TRUE)
+img4 <- rasterGrob(readPNG("Plots/1_ORA_BAT.png"), interpolate = TRUE)
+img5 <- rasterGrob(readPNG("Plots/1_ORA_Heart.png"), interpolate = TRUE)
+img6 <- rasterGrob(readPNG("Plots/1_ORA_Liver.png"), interpolate = TRUE)
+
+Fig.1 <- plot_grid(
+  img1, img2, img3,
+  img4, img5, img6,
+  ncol = 2
+)
+ggsave("Figures/Fig1.png", width = 15, height = 15, units = "in")
+
+# Fig 2
+img7 <- rasterGrob(readPNG("Plots/2_Correlation_BAT.png"), interpolate = TRUE)
+img8 <- rasterGrob(readPNG("Plots/2_Correlation_Heart.png"), interpolate = TRUE)
+img9 <- rasterGrob(readPNG("Plots/2_Correlation_Liver.png"), interpolate = TRUE)
+
+Fig.2 <- plot_grid(
+  img7, img8, img9,
+  ncol = 2
+)
+ggsave("Figures/Fig2.png", width = 22, height = 15, units = "in")
+
+# Fig 3
+img10 <- rasterGrob(readPNG("Plots/3_tas1r2.ttest_BAT.png"), interpolate = TRUE)
+img11 <- rasterGrob(readPNG("Plots/3_tas1r2.ttest_Heart.png"), interpolate = TRUE)
+img12 <- rasterGrob(readPNG("Plots/3_tas1r2.ttest_Liver.png"), interpolate = TRUE)
+img13 <- rasterGrob(readPNG("Plots/3_tas1r3.ttest_BAT.png"), interpolate = TRUE)
+img14 <- rasterGrob(readPNG("Plots/3_tas1r3.ttest_Heart.png"), interpolate = TRUE)
+img15 <- rasterGrob(readPNG("Plots/3_tas1r3.ttest_Liver.png"), interpolate = TRUE)
+
+Fig.3 <- plot_grid(
+  img10, img11, img12,
+  img13, img14, img15,
+  ncol = 2
+)
+ggsave("Figures/Fig3.png", width = 15, height = 15, units = "in")
+
+# Fig 4
+img16 <- rasterGrob(readPNG("Plots/4_GSEA_BAT.png"), interpolate = TRUE)
+img17 <- rasterGrob(readPNG("Plots/4_GSEA_Liver.png"), interpolate = TRUE)
+
+Fig.4 <- plot_grid(
+  img16, img17,
+  ncol = 1
+)
+ggsave("Figures/Fig4.png", width = 15, height = 15, units = "in")
+
+# Fig 5
+img18 <- rasterGrob(readPNG("Plots/5_ORA_enriched_Heart.png"), interpolate = TRUE)
+img19 <- rasterGrob(readPNG("Plots/5_ORA_depleted_Heart.png"), interpolate = TRUE)
+
+Fig.5 <- plot_grid(
+  img18, img19,
+  ncol = 1
+)
+ggsave("Figures/Fig5.png", width = 15, height = 15, units = "in")
+
+# Fig 6
+img20 <- rasterGrob(readPNG("Plots/6_Heatmap_BAT.png"), interpolate = TRUE)
+img21 <- rasterGrob(readPNG("Plots/6_Heatmap_Heart.png"), interpolate = TRUE)
+img22 <- rasterGrob(readPNG("Plots/6_Heatmap_Liver.png"), interpolate = TRUE)
+
+Fig.6 <- plot_grid(
+  img20, img21, img22,
+  ncol = 2
+)
+ggsave("Figures/Fig6.png", width = 15, height = 15, units = "in")
+```
+
+```{r figure panel}
+heatmap_grob <- heatmap$gtable
+wrapped_heatmap <- wrap_elements(full = heatmap_grob)
+
+img <- readPNG("table.png")
+img_grob <- rasterGrob(img, interpolate = TRUE)
+wrapped_img <- wrap_elements(full = img_grob)
+
+img.pathway <- readPNG("Pathway and Gene Name.png")
+img.pathway.grob <- rasterGrob(img.pathway, interpolate = TRUE)
+wrapped.img.pathway <- wrap_elements(full = img.pathway.grob)
+
+panel <- (qq_tas1r2 | ORA.barchart) /
+  (wrapped.img.pathway) /
+  (tas1r2.boxplot |tas1r3.boxplot) /
+  (correlation_plot | volcano) /
+  (wrapped_img | GSEA_bar) / 
+  (wrapped_heatmap)
+panel_with_title <- panel + 
+  plot_annotation(
+    title = "Liver Multi-Modal Analysis Panel",
+    theme = theme(plot.title = element_text(size = 20, face = "bold", hjust = 0.5),
+                  plot.subtitle = element_text(size = 14, hjust = 0.5))
+  ) +
+  plot_layout(heights = c(1, 3, 1, 1, 1, 1))
+
+ggsave("Liver_panel_plot.pdf", panel_with_title, width = 15, height = 40, units = "in")
+```
